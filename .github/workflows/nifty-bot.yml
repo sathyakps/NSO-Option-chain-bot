@@ -22,8 +22,6 @@ jobs:
     env:
       SINGLE_RUN: "true"  # script runs once then exits
       QUANTSAPP_URL: "https://web.quantsapp.com/option-chain"
-      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      TELEGRAM_TOKEN:    ${{ secrets.TELEGRAM_TOKEN }}
 
     steps:
       - name: Checkout repository
