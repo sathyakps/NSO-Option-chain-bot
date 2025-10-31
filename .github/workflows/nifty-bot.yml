@@ -1,9 +1,14 @@
-name: Nifty Option Bot (15m)
+name: Nifty Option Bot (Weekdays, Market Hours, every 15m)
 
 on:
+  # 09:15 IST (03:45 UTC) - single run
   schedule:
-    - cron: "*/15 * * * *"   # every 15 minutes (UTC)
-  workflow_dispatch: {}       # manual trigger
+    - cron: "45 3 * * 1-5"
+    # 09:30–14:45 IST (04:00–09:45 UTC) - every 15 minutes
+    - cron: "*/15 4-9 * * 1-5"
+    # 15:30 IST (10:00 UTC) - single run
+    - cron: "0 10 * * 1-5"
+  workflow_dispatch: {}  # manual trigger
 
 jobs:
   run-bot:
@@ -15,12 +20,21 @@ jobs:
       cancel-in-progress: true
 
     env:
-      SINGLE_RUN: "true"
+      SINGLE_RUN: "true"  # script runs once then exits
       QUANTSAPP_URL: "https://web.quantsapp.com/option-chain"
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      TELEGRAM_TOKEN:    ${{ secrets.TELEGRAM_TOKEN }}
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
+
+      # Restore last_oi.json so ΔOI is computed vs previous run
+      - name: Restore last_oi cache
+        uses: actions/cache@v4
+        with:
+          path: last_oi.json
+          key: last-oi-cache
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -31,11 +45,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-      - name: Install Playwright (Chromium) + OS deps
-        run: |
           python -m playwright install --with-deps chromium
 
-      - name: Run bot once
+      - name: Run bot (single pass)
         run: |
           python nifty_bot.py
+
+      # Save the updated cache for next run
+      - name: Save last_oi cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: last_oi.json
+          key: last-oi-cache
