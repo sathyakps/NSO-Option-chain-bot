@@ -1,16 +1,23 @@
-name: Nifty Option Chain Bot
+name: Nifty Option Bot (15m)
 
 on:
   schedule:
-    # Every 15 minutes, Monday–Friday (UTC). Script itself checks IST market hours.
-    - cron: "*/15 * * * 1-5"
-  workflow_dispatch: {}
+    - cron: "*/15 * * * *"   # every 15 minutes (UTC)
+  workflow_dispatch: {}       # manual trigger
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    timeout-minutes: 10
+
+    concurrency:
+      group: nifty-bot
+      cancel-in-progress: true
+
+    env:
+      SINGLE_RUN: "true"
+      QUANTSAPP_URL: "https://web.quantsapp.com/option-chain"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,14 +27,15 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run bot (single-shot)
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      - name: Install Playwright (Chromium) + OS deps
+        run: |
+          python -m playwright install --with-deps chromium
+
+      - name: Run bot once
         run: |
           python nifty_bot.py
