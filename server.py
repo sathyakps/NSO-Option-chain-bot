@@ -3,7 +3,7 @@ import os, asyncio
 from fastapi import FastAPI, HTTPException, Request
 
 app = FastAPI()
-RUN_KEY = os.getenv("RUN_KEY", "")  # set this as a secret
+RUN_KEY = os.getenv("RUN_KEY", "sathyakps")  # set this as a secret
 
 # import your existing function(s)
 from nifty_bot import fetch_and_post_once  # adjust if name differs
