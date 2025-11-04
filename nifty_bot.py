@@ -29,7 +29,7 @@ CACHE_FILE = "last_oi.json"
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8438185244:AAGt75e741i4XBsS14EiZAQS4VUZVV1w3RU")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "@nseopn")
 FETCH_INTERVAL_SECONDS = int(os.getenv("FETCH_INTERVAL_SECONDS", "900"))
-RUN_DURING_MARKET_HOURS = os.getenv("RUN_DURING_MARKET_HOURS", "tdrue").lower() == "true"
+RUN_DURING_MARKET_HOURS = os.getenv("RUN_DURING_MARKET_HOURS", "true").lower() == "true"
 MARKET_START = dt_time(9, 15)
 MARKET_END = dt_time(15, 30)
 
