@@ -31,6 +31,8 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8438185244:AAGt75e741i4XBsS14EiZAQ
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "@nseopn")
 FETCH_INTERVAL_SECONDS = int(os.getenv("FETCH_INTERVAL_SECONDS", "900"))
 RUN_DURING_MARKET_HOURS = os.getenv("RUN_DURING_MARKET_HOURS", "true").lower() == "true"
+SPOT_FETCH_ATTEMPTS = 3
+SPOT_FETCH_RETRY_DELAY_SECONDS = 1
 MARKET_START = dt_time(9, 15)
 MARKET_END = dt_time(15, 30)
 
@@ -250,23 +252,51 @@ async def fetch_quantsapp_data():
     return out
 
 
-# ---------- Fetch Nifty spot price ----------
-async def fetch_nifty_spot():
-    try:
-        async with aiohttp.ClientSession() as session:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-            async with session.get('https://www.nseindia.com/api/allIndices', headers=headers) as resp:
-                if resp.status == 200:
+# ---------- Fetch Nifty spot and India VIX ----------
+async def fetch_nifty_market_values():
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    }
+    timeout = aiohttp.ClientTimeout(total=10)
+    spot_price = "N/A"
+    vix_value = "N/A"
+
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        for attempt in range(1, SPOT_FETCH_ATTEMPTS + 1):
+            try:
+                async with session.get('https://www.nseindia.com/api/allIndices', headers=headers) as resp:
+                    resp.raise_for_status()
                     data = await resp.json()
-                    for index in data.get('data', []):
-                        if index.get('index') == 'NIFTY 50':
-                            return str(index.get('last'))
-                return "N/A"
-    except Exception as e:
-        logger.debug("Failed to fetch Nifty spot: %s", e)
-        return "N/A"
+
+                for index in data.get('data', []):
+                    index_name = index.get('index')
+                    last_value = index.get('last')
+                    if last_value is None or not str(last_value).strip():
+                        continue
+                    if index_name == 'NIFTY 50':
+                        spot_price = str(last_value)
+                    elif index_name == 'INDIA VIX':
+                        vix_value = str(last_value)
+
+                if spot_price != "N/A" and vix_value != "N/A":
+                    return spot_price, vix_value
+                missing = []
+                if spot_price == "N/A":
+                    missing.append("NIFTY 50")
+                if vix_value == "N/A":
+                    missing.append("INDIA VIX")
+                raise ValueError("Missing from NSE response: " + ", ".join(missing))
+            except Exception as e:
+                logger.warning(
+                    "NSE index fetch attempt %d/%d failed: %s",
+                    attempt,
+                    SPOT_FETCH_ATTEMPTS,
+                    e,
+                )
+                if attempt < SPOT_FETCH_ATTEMPTS:
+                    await asyncio.sleep(SPOT_FETCH_RETRY_DELAY_SECONDS)
+
+    return spot_price, vix_value
 
 
 def calc_delta(data_rows, prev_cache):
@@ -299,9 +329,9 @@ def calc_delta(data_rows, prev_cache):
 
 
 # ---------- Formatters & Telegram send ----------
-def format_ce_message(rows, spot_price, top_n=15):
+def format_ce_message(rows, spot_price, top_n=15, vix_value="N/A"):
     ts = now_ist().strftime("%Y-%m-%d %H:%M")
-    header = f"📈 *NIFTY CE (Call)*\n🕒 {ts} IST\n💰 Spot: {spot_price}\n\n"
+    header = f"📈 *NIFTY CE (Call)*\n🕒 {ts} IST\n💰 Spot: {spot_price}\n📊 India VIX: {vix_value}\n\n"
     body = "```\nStrike | OI       | ΔOI     | LTP (Δ)\n"
     body += "-------------------------------------\n"
     for d in (rows or [])[:top_n]:
@@ -315,9 +345,9 @@ def format_ce_message(rows, spot_price, top_n=15):
     return header + body
 
 
-def format_pe_message(rows, spot_price, top_n=15):
+def format_pe_message(rows, spot_price, top_n=15, vix_value="N/A"):
     ts = now_ist().strftime("%Y-%m-%d %H:%M")
-    header = f"📉 *NIFTY PE (Put)*\n🕒 {ts} IST\n💰 Spot: {spot_price}\n\n"
+    header = f"📉 *NIFTY PE (Put)*\n🕒 {ts} IST\n💰 Spot: {spot_price}\n📊 India VIX: {vix_value}\n\n"
     body = "```\nStrike | OI       | ΔOI     | LTP (Δ)\n"
     body += "-------------------------------------\n"
     for d in (rows or [])[:top_n]:
@@ -345,8 +375,8 @@ async def send_to_telegram(text, parse_mode="Markdown"):
 
 # ---------- Orchestration ----------
 async def fetch_and_post_once():
-    logger.info("Fetching Nifty spot price and Quantsapp data at %s ...", now_ist())
-    spot_price = await fetch_nifty_spot()
+    logger.info("Fetching Nifty spot, India VIX, and Quantsapp data at %s ...", now_ist())
+    spot_price, vix_value = await fetch_nifty_market_values()
     data = await fetch_quantsapp_data()
     if not data:
         logger.warning("No rows fetched.")
@@ -360,8 +390,8 @@ async def fetch_and_post_once():
         pass
 
     save_last_oi(computed)
-    ce_msg = format_ce_message(computed, spot_price)
-    pe_msg = format_pe_message(computed, spot_price)
+    ce_msg = format_ce_message(computed, spot_price, vix_value=vix_value)
+    pe_msg = format_pe_message(computed, spot_price, vix_value=vix_value)
     await send_to_telegram(ce_msg)
     await asyncio.sleep(0.5)
     await send_to_telegram(pe_msg)
